@@ -15,14 +15,37 @@ def extract_answer(solution):
     return solution
 
 
-def build_question_content(example):
+def build_system_message(example):
+    """Build system content for video processing"""
+    if example['data_type'] == 'video':
+        return (
+            'You are a helpful assistant.\n\n# Tools\n'
+            'You may call one or more functions to assist with the user query.\n'
+            'You are provided with function signatures within <tools></tools> XML tags:\n'
+            '<tools>\n'
+            '{"type":"function","function":{"name":"video_zoom_in_tool","description":"Zoom in on a specific segment of a video by trimming it based on a start and end time.","parameters":{"type":"object","properties":{"start_time":{"type": int, "description":"Start time of the video segment in seconds."},"end_time":{"type":"int","description":"End time of the video segment in seconds."}},"required":["start_time","end_time"]}}}\n'
+            '</tools>\n\n'
+            '# How to call a tool\n'
+            'Return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n'
+            '<tool_call>\n'
+            '{"name": <function-name>, "arguments": <args-json-object>}\n'
+            '</tool_call>\n\n'
+            '**Example**:\n'
+            '<tool_call>\n'
+            '{"name": "video_zoom_in_tool", "arguments": {"start_time": 5.0, "end_time": 12.5}}\n'
+            '</tool_call>'
+        )
+    elif example['data_type'] == 'image':
+        return "You are a helpful assistant"
+
+
+def build_usr_message(example):
     """Build question content with proper formatting"""
     QUESTION_TEMPLATE = (
         "{Question}\n"
         "Please think about this question as if you were a human pondering deeply. "
         "Engage in an internal dialogue using expressions such as 'let me think', 'wait', 'Hmm', 'oh, I see', 'let's break it down', etc, or other natural language thought expressions "
-        "It's encouraged to include self-reflection or verification in the reasoning process. "
-        "Provide your detailed reasoning between the <think> </think> tags, and then give your final answer between the <answer> </answer> tags."
+        "It's encouraged to include self-reflection or verification in the reasoning process."
     )
 
     TYPE_TEMPLATE = {
@@ -33,7 +56,6 @@ def build_question_content(example):
         "regression": " Please provide the numerical value (e.g., 42 or 3.14) within the <answer> </answer> tags."
     }
 
-    # Build question based on problem type
     if example["problem_type"] == 'multiple choice':
         question = example['problem'] + "\nOptions:\n"
         for op in example["options"]:
@@ -43,14 +65,20 @@ def build_question_content(example):
 
     # Add media tag at the beginning
     if example['data_type'] == 'video':
-        question = "<video>" + question
+        question = "<video>\n" + question
     elif example['data_type'] == 'image':
-        question = "<image>" + question
+        question = "<image>\n" + question
 
-    # Format final content
-    content = QUESTION_TEMPLATE.format(Question=question) + TYPE_TEMPLATE.get(example['problem_type'], "")
+    content = QUESTION_TEMPLATE.format(Question=question)
 
-    return content
+    if example['data_type'] == 'video':
+        content += "Think first, call **video_zoom_in_tool** if needed, then answer. Format strictly as:  <think>...</think>  <tool_call>...</tool_call> (if tools needed)  <answer>...</answer>."
+    elif example['data_type'] == 'image':
+        content += "Provide your detailed reasoning between the <think> </think> tags, and then give your final answer between the <answer> </answer> tags."
+
+    content += TYPE_TEMPLATE.get(example['problem_type'], "")
+
+    return content, question
 
 
 def process_fn(example, idx):
@@ -62,34 +90,38 @@ def process_fn(example, idx):
     path = example["path"]
     solution = example["solution"]
 
-    # Build question content
-    content = build_question_content(example)
-
-    # Extract answer
+    system_message = build_system_message(example)
+    usr_message, question = build_usr_message(example)
     answer = extract_answer(solution)
 
-    # Build base data structure
     data = {
         "data_source": data_source,
         "prompt": [
             {
+                "role": "system",
+                "content": system_message
+            },
+            {
                 "role": "user",
-                "content": content
+                "content": usr_message
             }
         ],
         "reward_model": {"style": "rule", "ground_truth": answer},
         "extra_info": {
-            "problem_type": problem_type,
+            "question_type": problem_type,
             "data_type": data_type,
-            "problem_id": problem_id
+            "index": problem_id,
+            "answer": answer,
+            "question": question
         },
     }
 
-    # Add media field based on data type
     if data_type == "video":
-        data["videos"] = [path]
+        data["env_mame"] = "video_toolbox"
+        data["videos"] = [{path}]
     elif data_type == "image":
-        data["images"] = [path]
+        data["env_mame"] = ""
+        data["images"] = [{path}]
 
     # Add split if available
     if "split" in example:
