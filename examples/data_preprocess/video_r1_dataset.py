@@ -1,7 +1,6 @@
 import argparse
 import os
 import re
-import copy
 
 import datasets
 
@@ -42,6 +41,8 @@ def build_system_message(example):
 
 def build_usr_message(example):
     """Build question content with proper formatting"""
+    import copy
+
     QUESTION_TEMPLATE = (
         "{Question}\n"
         "Please think about this question as if you were a human pondering deeply. "
@@ -121,9 +122,13 @@ def process_fn(example, idx):
     if data_type == "video":
         data["env_name"] = "video_toolbox"
         data["videos"] = [{"video": path}]
+        data["images"] = None
     elif data_type == "image":
         data["env_name"] = ""
         data["images"] = [{"path": path}]
+        data["videos"] = None
+    else:
+        raise ValueError("Invalid data type")
 
     # Add split if available
     if "split" in example:
@@ -173,3 +178,4 @@ if __name__ == "__main__":
     # Print sample for verification
     print("\nSample processed data:")
     print(processed_dataset[0])
+    print(processed_dataset[10])
