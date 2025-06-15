@@ -86,7 +86,6 @@ def build_usr_message(example):
 
 def process_fn(example, idx):
     """Process function to transform data format"""
-    data_source = example["data_source"]
     data_type = example["data_type"]
     problem_type = example["problem_type"]
     problem_id = example["problem_id"]
@@ -98,7 +97,7 @@ def process_fn(example, idx):
     answer = extract_answer(solution)
 
     data = {
-        "data_source": data_source,
+        "data_source": "video-r1",
         "prompt": [
             {
                 "role": "system",

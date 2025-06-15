@@ -6,6 +6,8 @@ import os
 
 from math_verify import parse, verify
 
+from vl_reward_utils import normalize_number, wer, compute_rouge_score
+
 openai_api_key = "EMPTY"
 openai_api_base_list = [
     # "http://172.30.52.123:8000/v1",
@@ -186,6 +188,81 @@ def extract_answer(text):
         return match.group(1).strip()
     return None
 
+############################################################################## VL reward ##############################################################################
+
+def _compute_format_score(predict_str: str):
+    is_format_error = False
+    count_think_1 = predict_str.count("<think>")
+    count_think_2 = predict_str.count("</think>")
+    if count_think_1 != count_think_2:
+        is_format_error = True
+
+    count_vision_1 = predict_str.count("<|vision_start|><|image_pad|>")
+    count_vision_2 = predict_str.count("<|image_pad|><|vision_end|>")
+    if count_vision_1 != count_vision_2:
+        is_format_error = True
+
+    predict_no_think = predict_str.split('</think>')[-1].strip()
+    count_answer_1 = predict_no_think.count("<answer>")
+    count_answer_2 = predict_no_think.count("</answer>")
+    if count_answer_1 != count_answer_2:
+        is_format_error = True
+
+    format_score = -1.0 if is_format_error else 0.0
+    return format_score, count_vision_1
+
+def _compute_accuracy_score(predict_str: str, ground_truth: str, extra_info=None):
+    predicted_answer = extract_answer(predict_str)
+    question_type = extra_info['question_type']
+    try:
+        if question_type == "multiple choice":
+            reward = 1.0 if predicted_answer.strip() == ground_truth.strip() else 0.0
+        elif question_type == "numerical":
+            gt_has_decimal = ("." in ground_truth) or ("," in ground_truth)
+            out_has_decimal = ("." in predicted_answer) or ("," in predicted_answer)
+            if gt_has_decimal != out_has_decimal:
+                reward = 0.0
+            else:
+                gt_number = normalize_number(ground_truth)
+                out_number = normalize_number(predicted_answer)
+                if gt_number is None or out_number is None:
+                    reward = 0.0
+                else:
+                    reward = 1.0 if round(gt_number, 2) == round(out_number, 2) else 0.0
+        elif question_type == "OCR":
+            error_rate = wer(ground_truth, predicted_answer)
+            reward = 1 - error_rate
+            reward = max(0.0, min(1.0, reward))
+        elif question_type == "free-form":
+            score = compute_rouge_score(ground_truth, predicted_answer)
+            reward = max(0.0, min(1.0, score))
+        elif question_type == "regression":
+            gt_number = normalize_number(ground_truth)
+            out_number = normalize_number(predicted_answer)
+            if gt_number is None or out_number is None:
+                reward = 0.0
+            rel_diff = (abs(out_number - gt_number) + 1e-9) / (abs(gt_number) + 1e-9)
+            rel_diff = min(1.0, max(0.0, rel_diff))
+            reward = 1 - rel_diff
+        else:
+            reward = 0.0
+    except Exception as e:
+        print(f"Error in reward_fn for question_type '{question_type}': {e}")
+        reward = 0.0
+
+    return reward
+
+def _compute_tool_score(count_vision: int, accuracy_score: float) -> float:
+    tool_score = 1.0 if count_vision > 0 and accuracy_score > 0.5 else 0.0
+    return tool_score
+
+def compute_vl_score(predict_str: str, ground_truth: str, extra_info=None) -> float:
+    format_score, count_vision = _compute_format_score(predict_str)
+    accuracy_score = _compute_accuracy_score(predict_str, ground_truth, extra_info)
+    tool_score = _compute_tool_score(count_vision, accuracy_score)
+    return 0.8 * accuracy_score + 0.2 * format_score + 1.2 * tool_score
+
+############################################################################## VL reward ##############################################################################
 
 def compute_score(predict_str: str, ground_truth: str, extra_info=None) -> float:
     is_format_error = False

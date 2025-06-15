@@ -76,6 +76,10 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
     elif data_source in ["frozenlake"]:
         res = 0.0
 
+    elif data_source == "video-r1":
+        from . import vl_agent
+        res = vl_agent.compute_vl_score(solution_str, ground_truth, extra_info)
+
     else:
         raise NotImplementedError(f"Reward function is not implemented for {data_source=}")
 
