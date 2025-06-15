@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+import copy
 
 import datasets
 
@@ -63,6 +64,8 @@ def build_usr_message(example):
     else:
         question = example['problem']
 
+    raw_question = copy.deepcopy(question)
+
     # Add media tag at the beginning
     if example['data_type'] == 'video':
         question = "<video>\n" + question
@@ -78,7 +81,7 @@ def build_usr_message(example):
 
     content += TYPE_TEMPLATE.get(example['problem_type'], "")
 
-    return content, question
+    return content, raw_question
 
 
 def process_fn(example, idx):
@@ -91,7 +94,7 @@ def process_fn(example, idx):
     solution = example["solution"]
 
     system_message = build_system_message(example)
-    usr_message, question = build_usr_message(example)
+    usr_message, raw_question = build_usr_message(example)
     answer = extract_answer(solution)
 
     data = {
@@ -112,16 +115,16 @@ def process_fn(example, idx):
             "data_type": data_type,
             "index": problem_id,
             "answer": answer,
-            "question": question
+            "question": raw_question
         },
     }
 
     if data_type == "video":
-        data["env_mame"] = "video_toolbox"
-        data["videos"] = [{path}]
+        data["env_name"] = "video_toolbox"
+        data["videos"] = [{"video": path}]
     elif data_type == "image":
-        data["env_mame"] = ""
-        data["images"] = [{path}]
+        data["env_name"] = ""
+        data["images"] = [{"path": path}]
 
     # Add split if available
     if "split" in example:
